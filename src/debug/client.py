@@ -259,14 +259,18 @@ class Client:
 
     def receive_stream(self):
         while self.is_running():
-            self._apply_command()
+            self._check_command_queue()
             data=b''
             try:
                 interleaved_hdr=self._receive_some(4)
+                if len(interleaved_hdr) != 4:
+                    continue
                 interleaved=RtpInterleaved(interleaved_hdr)
                 if self._verbose:
                     print(interleaved)
                 data=self._receive_some(interleaved.size)
+                if len(data) != interleaved.size:
+                    continue
                 self._store_rtp_packet(b''.join([interleaved_hdr, data]))
                 rtp_hdr=RtpHeader(data)
                 if self._verbose:
@@ -304,22 +308,27 @@ class Client:
     def _receive_some(self, length):
         data=bytearray()
         while len(data) < length:
+            if not self.is_running():
+                return b''
             try:
                 data += self._sock.recv(length - len(data))
             except socket.error as e:
                 if e.args[0] == errno.EAGAIN or e.args[0] == errno.EWOULDBLOCK:
-                    self._apply_command()
+                    self._check_command_queue()
                     sleep(0.001)
                     continue
         return data
 
-    def _apply_command(self):
-        command=[]
+    def _check_command_queue(self):
+        command=dict()
         with self._lock:
             if len(self._command_queue) > 0:
                 command=self._command_queue.pop(0)
                 self._verbose=False
-        if len(command) == 1:
+        self._apply_command(command)
+
+    def _apply_command(self, command):
+        if command:
             key, param = list(command.keys())[0], list(command.values())[0]
             if key == 'play':
                 self._dialog.authorization=self._prepare_authorization('PLAY')
@@ -330,7 +339,7 @@ class Client:
                 reply = self._send_command(self._dialog.pause(self.cseq, self._content_base, param))
                 self.cseq = reply.cseq + 1
             with self._lock:
-                self._verbose = False
+                self._verbose=False
 
     def _send_command(self, command):
         print(command)
@@ -340,7 +349,7 @@ class Client:
 
     def get_reply(self, data, command):
         idx_start=-1
-        while True:
+        while self.is_running():
             data+=self._receive_some(1)
             if len(data) > 10:
                 if idx_start == -1:
@@ -348,6 +357,8 @@ class Client:
                 idx_end=data.find(b'\x0d\x0a\x0d\x0a')
                 if idx_start != -1 and idx_end != -1:
                     break
+        if idx_start==-1:
+            return b''
         reply=RtspReply(data[idx_start:idx_end+4].decode('utf8'))
         if reply.content_length != 0:
             sdp=data[idx_end+4:]

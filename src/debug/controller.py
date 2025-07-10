@@ -19,6 +19,8 @@ class Controller:
                             break
                         elif event.key == keyboard.KeyCode.from_char('p'):
                             cl.pause()
+                        elif event.key == keyboard.KeyCode.from_char('r'):
+                            cl.play()
                         else:
                             pass
         except AttributeError as err:
