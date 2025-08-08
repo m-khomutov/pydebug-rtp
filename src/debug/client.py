@@ -31,9 +31,11 @@ class RtspDialog:
         return "DESCRIBE "+self.url+self.query+" RTSP/1.0\r\nAccept: application/sdp\r\nCSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+"\r\n"
 
     def setup(self, cseq, content_base, control):
-        if not content_base:
-            return "SETUP "+self.url+self.query+"/"+control+' RTSP/1.0\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nCSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
-        return "SETUP "+content_base+control+' RTSP/1.0\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nCSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
+        if control.startswith('rtsp://'):
+            return "SETUP "+control+' RTSP/1.0\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nCSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
+        if content_base:
+            return "SETUP "+content_base+control+' RTSP/1.0\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nCSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
+        return "SETUP "+self.url+self.query+"/"+control+' RTSP/1.0\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nCSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
 
     def play(self, cseq, content_base):
         if not content_base:
@@ -106,7 +108,7 @@ class SDP:
                 elif hdr.startswith('a=fmtp:'):
                     self.fmtp=hdr.split(':')[1]
                 elif hdr.startswith('a=control:'):
-                    self.control=hdr.split(':')[1]
+                    self.control=hdr.split('control:')[1]
 
 class Golomb:
     def __init__(self, data):
@@ -189,7 +191,7 @@ class Client:
 
     def __del__(self):
         try:
-            if len(self._dialog.session):
+            if self._dialog and len(self._dialog.session):
                 self._dialog.authorization = self._prepare_authorization('TEARDOWN')
                 reply = self._send_command(self._dialog.teardown(self.cseq, self._content_base))
                 print(reply)
