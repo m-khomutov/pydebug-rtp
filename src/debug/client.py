@@ -22,7 +22,8 @@ class RtspDialog:
             self.query=''
         self.authorization=''
         self.session=''
-        self._range='npt=0.000-\r\n'
+        self._range='Range: npt=0.000-\r\n'
+        self._scale='Scale: 1.0\r\n'
 
     def options(self, cseq=1):
         return "OPTIONS "+self.url+self.query+" RTSP/1.0\r\nCSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+"\r\n"
@@ -37,10 +38,12 @@ class RtspDialog:
             return "SETUP "+content_base+control+' RTSP/1.0\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nCSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
         return "SETUP "+self.url+self.query+"/"+control+' RTSP/1.0\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nCSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
 
-    def play(self, cseq, content_base):
+    def play(self, cseq, content_base, params=None):
+        if params:
+            self._set_parameters(params)
         if not content_base:
-            return "PLAY "+self.url+self.query+" RTSP/1.0\r\nRange: "+self._range+"CSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
-        return "PLAY "+content_base+" RTSP/1.0\r\nRange: "+self._range+"CSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
+            return "PLAY "+self.url+self.query+" RTSP/1.0\r\n"+self._range+self._scale+"CSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
+        return "PLAY "+content_base+" RTSP/1.0\r\n"+self._range+self._scale+"CSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
 
     def pause(self, cseq, content_base, range):
         if not content_base:
@@ -55,6 +58,16 @@ class RtspDialog:
         if not content_base:
             return "TEARDOWN "+self.url+self.query+" RTSP/1.0\r\nCSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
         return "TEARDOWN "+content_base+" RTSP/1.0\r\nCSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
+
+    def _set_parameters(self, params):
+        params = params[0].split('&')
+        for p in params:
+            if p.startswith('npt='):
+                self._range = 'Range: ' + p + '\r\n'
+            elif p.startswith('clock='):
+                self._range = 'Range: ' + p + '\r\n'
+            elif p.startswith('scale='):
+                self._scale = 'Scale: ' + p.split('=')[1] + '\r\n'
 
 
 class RtspReply:
@@ -251,9 +264,9 @@ class Client:
         if self._run_thread:
             self._run_thread.join()
 
-    def play(self, range=''):
+    def play(self, params):
         with self._lock:
-            self._command_queue.append({'play': range})
+            self._command_queue.append({'play': params})
 
     def pause(self, range=''):
         with self._lock:
@@ -331,14 +344,14 @@ class Client:
 
     def _apply_command(self, command):
         if command:
-            key, param = list(command.keys())[0], list(command.values())[0]
+            key, params = list(command.keys())[0], list(command.values())[0]
             if key == 'play':
                 self._dialog.authorization=self._prepare_authorization('PLAY')
-                reply=self._send_command(self._dialog.play(self.cseq, self._content_base))
+                reply=self._send_command(self._dialog.play(self.cseq, self._content_base, params[1:]))
                 self.cseq = reply.cseq+1
             elif key == 'pause':
                 self._dialog.authorization = self._prepare_authorization('PAUSE')
-                reply = self._send_command(self._dialog.pause(self.cseq, self._content_base, param))
+                reply = self._send_command(self._dialog.pause(self.cseq, self._content_base, params))
                 self.cseq = reply.cseq + 1
             with self._lock:
                 self._verbose=False
