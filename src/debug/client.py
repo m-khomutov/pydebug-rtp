@@ -4,6 +4,7 @@ import os
 import urllib.parse
 from base64 import b64encode
 from base64 import b64decode
+from datetime import datetime, timezone
 from hashlib import md5
 from time import sleep
 import threading
@@ -22,8 +23,7 @@ class RtspDialog:
             self.query=''
         self.authorization=''
         self.session=''
-        self._range='Range: npt=0.000-\r\n'
-        self._scale='Scale: 1.0\r\n'
+        self._range='npt=0.000-\r\n'
 
     def options(self, cseq=1):
         return "OPTIONS "+self.url+self.query+" RTSP/1.0\r\nCSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+"\r\n"
@@ -38,36 +38,32 @@ class RtspDialog:
             return "SETUP "+content_base+control+' RTSP/1.0\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nCSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
         return "SETUP "+self.url+self.query+"/"+control+' RTSP/1.0\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nCSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
 
-    def play(self, cseq, content_base, params=None):
-        if params:
-            self._set_parameters(params)
+    def play(self, cseq, content_base, a_range, scale):
         if not content_base:
-            return "PLAY "+self.url+self.query+" RTSP/1.0\r\n"+self._range+self._scale+"CSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
-        return "PLAY "+content_base+" RTSP/1.0\r\n"+self._range+self._scale+"CSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
+            ret="PLAY "+self.url+self.query+" RTSP/1.0\r\n"
+        else:
+            ret="PLAY "+content_base+" RTSP/1.0\r\n"
+        if a_range:
+            ret+="Range: "+a_range+"\r\n"
+        else:
+            ret+="Range: "+self._range
+        if scale:
+            ret+="Scale: "+str(scale)+"\r\n"
+        return ret+"CSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
 
-    def pause(self, cseq, content_base, range):
+    def pause(self, cseq, content_base, a_range):
         if not content_base:
             ret="PAUSE "+self.url+self.query+" RTSP/1.0\r\n"
         else:
             ret="PAUSE "+content_base+" RTSP/1.0\r\n"
-        if len(range):
-            ret += "Range: " + range + "\r\n"
+        if len(a_range):
+            ret += "Range: " + a_range + "\r\n"
         return ret + "CSeq: " + str(cseq) + "\r\nUser-Agent: " + self._user_agent + self.session + self.authorization + "\r\n"
 
     def teardown(self, cseq, content_base):
         if not content_base:
             return "TEARDOWN "+self.url+self.query+" RTSP/1.0\r\nCSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
         return "TEARDOWN "+content_base+" RTSP/1.0\r\nCSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
-
-    def _set_parameters(self, params):
-        params = params[0].split('&')
-        for p in params:
-            if p.startswith('npt='):
-                self._range = 'Range: ' + p + '\r\n'
-            elif p.startswith('clock='):
-                self._range = 'Range: ' + p + '\r\n'
-            elif p.startswith('scale='):
-                self._scale = 'Scale: ' + p.split('=')[1] + '\r\n'
 
 
 class RtspReply:
@@ -115,7 +111,7 @@ class SDP:
                 vs=False
             elif hdr.startswith('a=range:'):
                 self.range=hdr.split(':')[1]
-            elif vs == True:
+            elif vs:
                 if hdr.startswith('a=rtpmap:'):
                     self.rtpmap=hdr.split(':')[1]
                 elif hdr.startswith('a=fmtp:'):
@@ -188,7 +184,7 @@ class Client:
         self._command_queue=[]
         self._verbose=False
         self.nalunit=b''
-        self.SDP=None
+        self.sdp=None
         self.exception=None
         self._run_thread=None
         self._dialog=None
@@ -207,7 +203,7 @@ class Client:
             if self._dialog and len(self._dialog.session):
                 self._dialog.authorization = self._prepare_authorization('TEARDOWN')
                 reply = self._send_command(self._dialog.teardown(self.cseq, self._content_base))
-                print(reply)
+                print(f'{datetime.now()} {reply}')
         except ConnectionResetError:
             pass
         self._sock.close()
@@ -223,7 +219,6 @@ class Client:
         self._dialog=RtspDialog(self._url.scheme+'://'+self._url.hostname+':'+str(self._url.port)+self._url.path, self._url.query)
         self._sock.connect((self._url.hostname, self._url.port))
         self._sock.setblocking(False)
-
         reply=self._send_command(self._dialog.options(self.cseq))
         self.cseq = reply.cseq+1
 
@@ -243,11 +238,11 @@ class Client:
         self.cseq = reply.cseq+1
 
         self._dialog.session='Session: '+reply.session+'\r\n'
-        if len(self.sdp.range):
-            self._dialog.range=self.sdp.range='\r\n'
+        if self.sdp and len(self.sdp.range):
+            self._dialog.range=self.sdp.range+'\r\n'
 
         self._dialog.authorization = self._prepare_authorization('PLAY')
-        reply = self._send_command(self._dialog.play(reply.cseq + 1, self._content_base))
+        reply = self._send_command(self._dialog.play(reply.cseq + 1, self._content_base, self.sdp.range if self.sdp else None, 1))
         self.cseq = reply.cseq+1
 
     def run(self):
@@ -264,13 +259,17 @@ class Client:
         if self._run_thread:
             self._run_thread.join()
 
-    def play(self, params):
+    def play(self, http_params):
         with self._lock:
-            self._command_queue.append({'play': params})
+            self._command_queue.append({'play': http_params})
 
-    def pause(self, range=''):
+    def pause(self):
         with self._lock:
-            self._command_queue.append({'pause': range})
+            self._command_queue.append({'pause': ''})
+
+    def get_parameter(self, http_params):
+        with self._lock:
+            self._command_queue.append({'get_parameter': http_params})
 
     def receive_stream(self):
         while self.is_running():
@@ -346,9 +345,19 @@ class Client:
         if command:
             key, params = list(command.keys())[0], list(command.values())[0]
             if key == 'play':
+                a_range=None
+                a_scale=1
+                for param in params.split('&'):
+                    p=param.split('=')
+                    if len(p)==2:
+                        if p[0]=='pos':
+                            utc_dt = datetime.fromtimestamp(int(p[1])).astimezone().astimezone(timezone.utc)
+                            a_range="clock="+utc_dt.strftime('%Y%m%dT%H%M%S')+'Z-'
+                        elif p[0]=='scale':
+                            a_scale=int(p[1])
                 self._dialog.authorization=self._prepare_authorization('PLAY')
-                reply=self._send_command(self._dialog.play(self.cseq, self._content_base, params[1:]))
-                self.cseq = reply.cseq+1
+                self._send_command(self._dialog.play(self.cseq+1, self._content_base, a_range, a_scale))
+                self.cseq+=1
             elif key == 'pause':
                 self._dialog.authorization = self._prepare_authorization('PAUSE')
                 reply = self._send_command(self._dialog.pause(self.cseq, self._content_base, params))
@@ -357,7 +366,7 @@ class Client:
                 self._verbose=False
 
     def _send_command(self, command):
-        print(command)
+        print(f'{datetime.now()} {command}')
         self._sock.sendall(str.encode(command))
         data=b''
         return self.get_reply(data, command)
@@ -380,7 +389,7 @@ class Client:
             while len(sdp) < reply.content_length:
                 sdp+=self._sock.recv(reply.content_length-len(sdp))
             reply=RtspReply(data[idx_start:idx_end+4].decode('utf8')+sdp.decode('utf8'))
-        print(reply)
+        print(f'{datetime.now()} {reply}')
         if reply.result == 401:
             self._dialog.authorization=self._set_authorization(reply, command)
             if len(self._dialog.authorization) == 0:
