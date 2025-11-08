@@ -103,6 +103,7 @@ class SDP:
         self.fmtp=''
         self.control=''
         self.range=''
+        self.full_range=''
         vs=False
         for hdr in headers:
             if hdr.startswith('m=video'):
@@ -110,7 +111,8 @@ class SDP:
             elif hdr.startswith('m=audio'):
                 vs=False
             elif hdr.startswith('a=range:'):
-                self.range=hdr.split(':')[1]
+                self.range=hdr.split(':')[1].split(';')
+                self.full_range=self.range[0].split('-')[0]+'-'+self.range[-1].split('-')[1]
             elif vs:
                 if hdr.startswith('a=rtpmap:'):
                     self.rtpmap=hdr.split(':')[1]
@@ -238,11 +240,11 @@ class Client:
         self.cseq = reply.cseq+1
 
         self._dialog.session='Session: '+reply.session+'\r\n'
-        if self.sdp and len(self.sdp.range):
-            self._dialog.range=self.sdp.range+'\r\n'
+        if self.sdp and len(self.sdp.full_range):
+            self._dialog.range=self.sdp.full_range+'\r\n'
 
         self._dialog.authorization = self._prepare_authorization('PLAY')
-        reply = self._send_command(self._dialog.play(reply.cseq + 1, self._content_base, self.sdp.range if self.sdp else None, 1))
+        reply = self._send_command(self._dialog.play(reply.cseq + 1, self._content_base, self.sdp.full_range if self.sdp else None, 1))
         self.cseq = reply.cseq+1
 
     def run(self):
