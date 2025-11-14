@@ -175,7 +175,7 @@ class DumpType(IntEnum):
 
 
 class Client:
-    def __init__(self, dumps):
+    def __init__(self, dumps, verbose):
         self.dumps=dumps
         self._sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setblocking(True)
@@ -184,7 +184,7 @@ class Client:
         self._url=None
         self.running=True
         self._command_queue=[]
-        self._verbose=False
+        self._verbose=verbose
         self.nalunit=b''
         self.sdp=None
         self.exception=None
@@ -261,7 +261,7 @@ class Client:
         if self._run_thread:
             self._run_thread.join()
 
-    def play(self, http_params):
+    def play(self, http_params = ''):
         with self._lock:
             self._command_queue.append({'play': http_params})
 
@@ -274,6 +274,8 @@ class Client:
             self._command_queue.append({'get_parameter': http_params})
 
     def receive_stream(self):
+        gop_size=0
+        has_idr=False
         while self.is_running():
             self._check_command_queue()
             data=b''
@@ -302,12 +304,21 @@ class Client:
                     if nalu.fu_header.E == 1:
                         nalu=RtpNalunit(self.nalunit)
                         print(f'{nalu} {SliceHeader(self.nalunit[1:3])} sz:{nalu.size}')
+                        if nalu.header.Type == NalunitType.IDR or nalu.header.Type == NalunitType.NON_IDR:
+                            if nalu.header.Type == NalunitType.IDR:
+                                has_idr=True
+                            gop_size+=1
                         self._store_frame(self.nalunit)
                 else:
                     if nalu.header.Type == NalunitType.NON_IDR:
                         print(f'{nalu} {SliceHeader(data[rtp_hdr.size + 1:rtp_hdr.size + 3])} sz:{nalu.size}')
+                        gop_size += 1
                     else:
                         print(f'{nalu} sz: {nalu.size}')
+                        if self._verbose and nalu.header.Type == NalunitType.SPS:
+                            print(f'GOP size={gop_size} {" has" if has_idr else " no"} IDR ')
+                            has_idr = False
+                            gop_size = 0
                     self._store_frame(data[rtp_hdr.size:data_end])
 
             except InvalidRtpInterleaved as err:
@@ -337,35 +348,39 @@ class Client:
 
     def _check_command_queue(self):
         command=dict()
+        verb=self._verbose
         with self._lock:
             if len(self._command_queue) > 0:
                 command=self._command_queue.pop(0)
                 self._verbose=False
         self._apply_command(command)
+        with self._lock:
+            self._verbose=verb
 
     def _apply_command(self, command):
         if command:
             key, params = list(command.keys())[0], list(command.values())[0]
-            if key == 'play':
-                a_range=None
-                a_scale=1
-                for param in params.split('&'):
-                    p=param.split('=')
-                    if len(p)==2:
-                        if p[0]=='pos':
-                            utc_dt = datetime.fromtimestamp(int(p[1])).astimezone().astimezone(timezone.utc)
-                            a_range="clock="+utc_dt.strftime('%Y%m%dT%H%M%S')+'Z-'
-                        elif p[0]=='scale':
-                            a_scale=int(p[1])
-                self._dialog.authorization=self._prepare_authorization('PLAY')
-                self._send_command(self._dialog.play(self.cseq+1, self._content_base, a_range, a_scale))
-                self.cseq+=1
-            elif key == 'pause':
-                self._dialog.authorization = self._prepare_authorization('PAUSE')
-                reply = self._send_command(self._dialog.pause(self.cseq, self._content_base, params))
-                self.cseq = reply.cseq + 1
-            with self._lock:
-                self._verbose=False
+            try:
+                if key == 'play':
+                    a_range=None
+                    a_scale=1
+                    for param in params.split('&'):
+                        p=param.split('=')
+                        if len(p)==2:
+                            if p[0]=='pos':
+                                utc_dt = datetime.fromtimestamp(int(p[1])).astimezone().astimezone(timezone.utc)
+                                a_range="clock="+utc_dt.strftime('%Y%m%dT%H%M%S')+'Z-'
+                            elif p[0]=='scale':
+                                a_scale=int(p[1])
+                    self._dialog.authorization=self._prepare_authorization('PLAY')
+                    self._send_command(self._dialog.play(self.cseq+1, self._content_base, a_range, a_scale))
+                    self.cseq+=1
+                elif key == 'pause':
+                    self._dialog.authorization = self._prepare_authorization('PAUSE')
+                    reply = self._send_command(self._dialog.pause(self.cseq, self._content_base, params))
+                    self.cseq = reply.cseq + 1
+            except RuntimeError as re:
+                print(f'{key} error: {re}')
 
     def _send_command(self, command):
         print(f'{datetime.now()} {command}')

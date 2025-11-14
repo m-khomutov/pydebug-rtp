@@ -79,7 +79,7 @@ class RtpNalunitHeader:
         self.Type=(c & 0x1f)
 
     def __str__(self):
-        return 'F:'+str(self.F)+' nri:'+str(self.NRI)+' type:'+str(self.Type)
+        return 'F:'+str(self.F)+' nri:'+str(self.NRI)+' type:'+hex(self.Type)
 
 
 class RtpFUHeader:
