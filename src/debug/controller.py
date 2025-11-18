@@ -1,6 +1,5 @@
 import argparse
 import logging
-from pynput import keyboard
 from http.server import BaseHTTPRequestHandler,HTTPServer
 from socketserver import ThreadingMixIn
 from . import client
@@ -24,40 +23,6 @@ def handler(rtsp_client):
             self.end_headers()
 
     return Handler
-
-
-class Controller:
-    def __init__(self, url, dumps):
-        cl = client.Client(dumps)
-        try:
-            cl.connect(url)
-            cl.run()
-            with keyboard.Events() as events:
-                if not cl.is_running():
-                    if cl.exception:
-                        raise cl.exception
-                for event in events:
-                    if type(event) is keyboard.Events.Release:
-                        if event.key == keyboard.KeyCode.from_char('q'):
-                            break
-                        elif event.key == keyboard.KeyCode.from_char('p'):
-                            cl.pause()
-                        elif event.key == keyboard.KeyCode.from_char('r'):
-                            cl.play()
-                        else:
-                            pass
-        except AttributeError as err:
-            print(err)
-        except ConnectionRefusedError as err:
-            print(err)
-        except RuntimeError as err:
-            print(err)
-        except client.InvalidRtpInterleaved as err:
-            print(err)
-        except KeyboardInterrupt as err:
-            print(err)
-        finally:
-            cl.stop()
 
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -86,6 +51,4 @@ def start():
     http_server.server_close()
     rtsp_client.stop()
     logging.info('Stopped')
-
-    #Controller(args.url, (args.h264Dump, args.rtpDump))
 

@@ -31,12 +31,12 @@ class RtspDialog:
     def describe(self, cseq):
         return "DESCRIBE "+self.url+self.query+" RTSP/1.0\r\nAccept: application/sdp\r\nCSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+"\r\n"
 
-    def setup(self, cseq, content_base, control):
+    def setup(self, cseq, content_base, transport, control):
         if control.startswith('rtsp://'):
-            return "SETUP "+control+' RTSP/1.0\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nCSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
+            return 'SETUP '+control+' RTSP/1.0\r\n'+transport+'CSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
         if content_base:
-            return "SETUP "+content_base+control+' RTSP/1.0\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nCSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
-        return "SETUP "+self.url+self.query+"/"+control+' RTSP/1.0\r\nTransport: RTP/AVP/TCP;unicast;interleaved=0-1\r\nCSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
+            return "SETUP "+content_base+control+' RTSP/1.0\r\n'+transport+'CSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
+        return "SETUP "+self.url+self.query+"/"+control+' RTSP/1.0\r\n'+transport+'CSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+'\r\n'
 
     def play(self, cseq, content_base, a_range, scale):
         if not content_base:
@@ -99,27 +99,27 @@ class RtspReply:
 
 class SDP:
     def __init__(self, headers):
-        self.rtpmap=''
-        self.fmtp=''
-        self.control=''
+        self.rtpmap=[None,None]
+        self.fmtp=[None,None]
+        self.control=[None,None]
         self.range=''
         self.full_range=''
-        vs=False
+        vs=0
         for hdr in headers:
             if hdr.startswith('m=video'):
-                vs=True
+                vs=0
             elif hdr.startswith('m=audio'):
-                vs=False
+                vs=1
             elif hdr.startswith('a=range:'):
                 self.range=hdr.split(':')[1].split(';')
                 self.full_range=self.range[0].split('-')[0]+'-'+self.range[-1].split('-')[1]
-            elif vs:
-                if hdr.startswith('a=rtpmap:'):
-                    self.rtpmap=hdr.split(':')[1]
-                elif hdr.startswith('a=fmtp:'):
-                    self.fmtp=hdr.split(':')[1]
-                elif hdr.startswith('a=control:'):
-                    self.control=hdr.split('control:')[1]
+            if hdr.startswith('a=rtpmap:'):
+                self.rtpmap[vs]=hdr.split(':')[1]
+            elif hdr.startswith('a=fmtp:'):
+                self.fmtp[vs]=hdr.split(':')[1]
+            elif hdr.startswith('a=control:'):
+                self.control[vs]=hdr.split('control:')[1]
+
 
 class Golomb:
     def __init__(self, data):
@@ -230,21 +230,31 @@ class Client:
             reply = self._send_command(self._dialog.describe(self.cseq))
             self.cseq = reply.cseq+1
 
+        self._store_sdp(reply.headers)
+
         self.sdp=SDP(reply.headers)
         if len(reply.content_base) > 0:
             self._dialog.url=reply.content_base
             self._content_base=reply.content_base
 
         self._dialog.authorization = self._prepare_authorization('SETUP')
-        reply = self._send_command(self._dialog.setup(reply.cseq + 1, reply.content_base, self.sdp.control))
-        self.cseq = reply.cseq+1
+        interleaved=0
+        for sdp_control in self.sdp.control:
+            if sdp_control:
+                transport = 'Transport: RTP/AVP/TCP;unicast;interleaved='+str(interleaved)+'-'+str(interleaved+1)+'\r\n'
+                reply = self._send_command(self._dialog.setup(reply.cseq + 1, reply.content_base, transport, sdp_control))
+                self.cseq = reply.cseq+1
+                interleaved+=2
+            self._dialog.session='Session: '+reply.session+'\r\n'
 
-        self._dialog.session='Session: '+reply.session+'\r\n'
         if self.sdp and len(self.sdp.full_range):
             self._dialog.range=self.sdp.full_range+'\r\n'
 
         self._dialog.authorization = self._prepare_authorization('PLAY')
-        reply = self._send_command(self._dialog.play(reply.cseq + 1, self._content_base, self.sdp.full_range if self.sdp else None, 1))
+        if self.sdp.control[0] and self.sdp.control[0].startswith('rtsp://'):
+            reply = self._send_command(self._dialog.play(reply.cseq + 1, self.sdp.control[0], self.sdp.full_range if self.sdp else None, 1))
+        else:
+            reply = self._send_command(self._dialog.play(reply.cseq + 1, self._content_base, self.sdp.full_range if self.sdp else None, 1))
         self.cseq = reply.cseq+1
 
     def run(self):
@@ -463,3 +473,18 @@ class Client:
         if self.dumps[DumpType.RTP]:
             with open(self.dumps[DumpType.RTP], 'ab') as f:
                 f.write(packet)
+
+    def _store_sdp(self, headers):
+        if self.dumps[DumpType.RTP]:
+            sdp_to_store=[]
+            empty_line_passed=False
+            for hdr in headers:
+                if not empty_line_passed:
+                    if not len(hdr):
+                        empty_line_passed=True
+                    continue
+                sdp_to_store.append(hdr+'\r\n')
+            with open(self.dumps[DumpType.RTP], 'ab') as f:
+                s=''.join(sdp_to_store)
+                f.write(len(s).to_bytes(length=4, byteorder='big', signed=False))
+                f.write(s.encode())
