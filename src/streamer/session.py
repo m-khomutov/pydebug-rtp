@@ -47,5 +47,6 @@ class Session:
 
     def play_range(self, headers):
         """Returns media duration in Clock or NPT format"""
-        self._play_range=[x for x in headers if 'Range: ' in x][0]
+        self._play_range=[x for x in headers if 'Range: ' in x]
+        self._play_range = self._play_range[0] if self._play_range else ''
         return self._play_range

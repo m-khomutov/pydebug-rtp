@@ -85,8 +85,8 @@ class Service(multiprocessing.Process):
 
 def start():
     parser: argparse.ArgumentParser = argparse.ArgumentParser(description='rtp console client')
-    parser.add_argument('-root', type=str, help='path to search rtp dumps. (def. ./)')
-    parser.add_argument('-port', type=int, help='port to bind service (def. 4558')
+    parser.add_argument('-root', type=str, default='.', help='path to search rtp dumps. (def. ./)')
+    parser.add_argument('-port', type=int, default=4558, help='port to bind service (def. 4558')
     args: argparse.Namespace = parser.parse_args()
 
     Service(('', args.port), args.root).run()
