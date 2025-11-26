@@ -101,10 +101,11 @@ class SDP:
     def __init__(self, headers):
         self.rtpmap=[None,None]
         self.fmtp=[None,None]
+        self.aggregate_control=''
         self.control=[None,None]
         self.range=''
         self.full_range=''
-        vs=0
+        vs=-1
         for hdr in headers:
             if hdr.startswith('m=video'):
                 vs=0
@@ -118,7 +119,10 @@ class SDP:
             elif hdr.startswith('a=fmtp:'):
                 self.fmtp[vs]=hdr.split(':')[1]
             elif hdr.startswith('a=control:'):
-                self.control[vs]=hdr.split('control:')[1]
+                if vs==-1:
+                    self.aggregate_control=hdr.split('control:')[1]
+                else:
+                    self.control[vs]=hdr.split('control:')[1]
 
 
 class Golomb:
@@ -251,8 +255,8 @@ class Client:
             self._dialog.range=self.sdp.full_range+'\r\n'
 
         self._dialog.authorization = self._prepare_authorization('PLAY')
-        if self.sdp.control[0] and self.sdp.control[0].startswith('rtsp://'):
-            reply = self._send_command(self._dialog.play(reply.cseq + 1, self.sdp.control[0], self.sdp.full_range if self.sdp else None, 1))
+        if self.sdp.aggregate_control and self.sdp.aggregate_control.startswith('rtsp://'):
+            reply = self._send_command(self._dialog.play(reply.cseq + 1, self.sdp.aggregate_control, self.sdp.full_range if self.sdp else None, 1))
         else:
             reply = self._send_command(self._dialog.play(reply.cseq + 1, self._content_base, self.sdp.full_range if self.sdp else None, 1))
         self.cseq = reply.cseq+1

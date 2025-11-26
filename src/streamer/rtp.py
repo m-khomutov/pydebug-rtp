@@ -11,17 +11,27 @@ class RtpInterleaved:
         if self.preamble != b'$':
             raise InvalidRtpInterleaved('invalid preamble: '+str(self.preamble))
 
+    def __repr__(self):
+        return f'channel:{self.channel} size:{self.size}'
+
 
 class RtpHeader:
     def __init__(self, data):
-        self.counter,\
-        self.payload_type,\
+        self._first_byte,\
+        self._second_byte,\
         self.sequence_number,\
         self.timestamp,\
         self.SSRC=struct.unpack('>BBHII', data)
-        self.version=(self.counter>>6) & 2
-        self.P=(self.counter>>5) & 1
-        self.X=(self.counter>>4) & 1
-        self.counter=(self.counter & 4)
-        self.M=(self.payload_type>>7) & 1
-        self.payload_type=(self.payload_type & 0x7f)
+        self.version=(self._first_byte>>6) & 2
+        self.P=(self._first_byte>>5) & 1
+        self.X=(self._first_byte>>4) & 1
+        self.counter=(self._first_byte & 4)
+        self.M=(self._second_byte>>7) & 1
+        self.payload_type=(self._second_byte & 0x7f)
+
+    def __bytes__(self):
+        return struct.pack('>BBHII',self._first_byte,
+                           self._second_byte,
+                           self.sequence_number,
+                           self.timestamp,
+                           self.SSRC)

@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import List
 from .session import Session
 from .dump import Dump
+from .rtp import RtpInterleaved
 
 class Connection:
     @staticmethod
@@ -56,26 +57,29 @@ class Connection:
 
     def _on_rtsp_directive(self, data):
         """Manages RTSP directive"""
-        headers = []
-        try:
-            directive = data.inb.decode('utf-8')
-            print(directive)
-            headers = directive.split('\r\n')
-            if headers[0][:8] == 'OPTIONS ':
-                self._on_options(headers, data)
-            elif headers[0][:9] == "DESCRIBE ":
-                self._on_describe(headers, data)
-            elif headers[0][:14] == "GET_PARAMETER ":
-                self._on_get_parameter(headers, data)
-            elif headers[0][:6] == "SETUP ":
-                self._on_setup(headers, data)
-            elif headers[0][:5] == "PLAY ":
-                self._on_play(headers, data)
-            elif headers[0][:9] == "TEARDOWN ":
-                self._on_teardown(headers, data)
-        except:  # noqa # pylint: disable=bare-except
-            data.outb = ''.join(['RTSP/1.0 400 Bad Request\r\n', self._sequence_number(headers), '\r\n']).encode()
-        print(data.outb.decode('utf-8'))
+        if data.inb[0] == 0x24:
+            print(f'rtcp reply: {str(RtpInterleaved(data.inb[0:4]))}')
+        else:
+            headers = []
+            try:
+                directive = data.inb.decode('utf-8')
+                print(directive)
+                headers = directive.split('\r\n')
+                if headers[0][:8] == 'OPTIONS ':
+                    self._on_options(headers, data)
+                elif headers[0][:9] == "DESCRIBE ":
+                    self._on_describe(headers, data)
+                elif headers[0][:14] == "GET_PARAMETER ":
+                    self._on_get_parameter(headers, data)
+                elif headers[0][:6] == "SETUP ":
+                    self._on_setup(headers, data)
+                elif headers[0][:5] == "PLAY ":
+                    self._on_play(headers, data)
+                elif headers[0][:9] == "TEARDOWN ":
+                    self._on_teardown(headers, data)
+            except:  # noqa # pylint: disable=bare-except
+                data.outb = ''.join(['RTSP/1.0 400 Bad Request\r\n', self._sequence_number(headers), '\r\n']).encode()
+            print(data.outb.decode('utf-8'))
 
     def _on_options(self, headers, data):
         """Manager OPTIONS RTSP directive"""
