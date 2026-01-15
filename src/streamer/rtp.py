@@ -35,3 +35,6 @@ class RtpHeader:
                            self.sequence_number,
                            self.timestamp,
                            self.SSRC)
+
+    def __repr__(self):
+        return f'RTP [P:{self.P} X:{self.X} counter:{self.counter} M:{self.M} PT:{self.payload_type}]'

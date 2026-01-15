@@ -45,14 +45,16 @@ class Dump:
         self._update_frame_length(interleaved, buf[16] & 0x1f)
         if interleaved.channel == 1:
             print(f'rtcp request: {str(interleaved)}')
-        if ts_diff := rtp_header.timestamp - self._timestamp[interleaved.channel]:
-            if interleaved.channel == 0:
-                if buf[16] & 0x1f == 28: # в FU-A учесть NALU-header
-                   self._frame_length[interleaved.channel] += 1
-                time.sleep(ts_diff / self._rtpmap[0])
-            print(f'{str(NaluHeader(buf[16]))} {"audio" if interleaved.channel else "video"} ts_diff: {ts_diff} length: {self._frame_length[interleaved.channel]}')
-            self._frame_length[interleaved.channel] = 0
-        self._timestamp[interleaved.channel]=rtp_header.timestamp
+        else:
+            if rtp_header.M:
+                ts_diff = rtp_header.timestamp - self._timestamp[interleaved.channel]
+                if interleaved.channel == 0:
+                    if buf[16] & 0x1f == 28: # в FU-A учесть NALU-header
+                        self._frame_length[interleaved.channel] += 1
+                    time.sleep(ts_diff / self._rtpmap[0])
+                print(f'{str(NaluHeader(buf[16]))} {"audio" if interleaved.channel else "video"} ts_diff: {ts_diff} length: {self._frame_length[interleaved.channel]}')
+                self._frame_length[interleaved.channel] = 0
+                self._timestamp[interleaved.channel]=rtp_header.timestamp
         return buf
 
     def _open_dump(self):
