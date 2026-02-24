@@ -43,8 +43,11 @@ class Dump:
              self._marshall_rtp_header(rtp_header, self._timestamp_ext[interleaved.channel])+
              self._read_bytes(interleaved.size-12))
         self._update_frame_length(interleaved, buf[16] & 0x1f)
-        if interleaved.channel == 1:
+        if interleaved.channel % 2:
             print(f'rtcp request: {str(interleaved)}')
+            for b in buf:
+                print(f'{hex(b)}', end=' ')
+            print('')
         else:
             if rtp_header.M:
                 ts_diff = rtp_header.timestamp - self._timestamp[interleaved.channel]

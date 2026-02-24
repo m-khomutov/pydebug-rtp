@@ -59,6 +59,9 @@ class Connection:
         """Manages RTSP directive"""
         if data.inb[0] == 0x24:
             print(f'rtcp reply: {str(RtpInterleaved(data.inb[0:4]))}')
+            for b in data.inb:
+                print(f'{hex(b)}', end=' ')
+            print('')
         else:
             headers = []
             try:

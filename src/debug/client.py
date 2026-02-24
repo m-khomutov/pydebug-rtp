@@ -179,6 +179,8 @@ class DumpType(IntEnum):
 
 
 class Client:
+    INTERLEAVED_CHANNELS = (0, 2)
+
     def __init__(self, dumps, verbose):
         self.dumps=dumps
         self._sock=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -242,13 +244,14 @@ class Client:
             self._content_base=reply.content_base
 
         self._dialog.authorization = self._prepare_authorization('SETUP')
-        interleaved=0
+        channel_index = 0
         for sdp_control in self.sdp.control:
+            interleaved = Client.INTERLEAVED_CHANNELS[channel_index]
             if sdp_control:
                 transport = 'Transport: RTP/AVP/TCP;unicast;interleaved='+str(interleaved)+'-'+str(interleaved+1)+'\r\n'
                 reply = self._send_command(self._dialog.setup(reply.cseq + 1, reply.content_base, transport, sdp_control))
                 self.cseq = reply.cseq+1
-                interleaved+=2
+                channel_index += 1
             self._dialog.session='Session: '+reply.session+'\r\n'
 
         if self.sdp and len(self.sdp.full_range):
@@ -310,31 +313,33 @@ class Client:
                 data_end = len(data) if rtp_hdr.P == 0 else len(data) - int(data[-1])
                 if data_end <= rtp_hdr.size:
                     continue
-                nalu=RtpNalunit(data[rtp_hdr.size:data_end])
-                if nalu.header.Type == NalunitType.FU_A:
-                    if nalu.fu_header.S == 1:
-                        self.nalunit=((nalu.header.F < 7) | (nalu.header.NRI << 5) | (nalu.fu_header.Type)).to_bytes(1, byteorder='big')
-                    self.nalunit += data[rtp_hdr.size+2:data_end]
-                    if nalu.fu_header.E == 1:
-                        nalu=RtpNalunit(self.nalunit)
-                        print(f'{nalu} {SliceHeader(self.nalunit[1:3])} sz:{nalu.size}')
-                        if nalu.header.Type == NalunitType.IDR or nalu.header.Type == NalunitType.NON_IDR:
-                            if nalu.header.Type == NalunitType.IDR:
-                                has_idr=True
-                            gop_size+=1
-                        self._store_frame(self.nalunit)
-                else:
-                    if nalu.header.Type == NalunitType.NON_IDR:
-                        print(f'{nalu} {SliceHeader(data[rtp_hdr.size + 1:rtp_hdr.size + 3])} sz:{nalu.size}')
-                        gop_size += 1
+                if interleaved.channel == Client.INTERLEAVED_CHANNELS[0]:
+                    nalu = RtpNalunit(data[rtp_hdr.size:data_end])
+                    if nalu.header.Type == NalunitType.FU_A:
+                        if nalu.fu_header.S == 1:
+                            self.nalunit=((nalu.header.F < 7) | (nalu.header.NRI << 5) | nalu.fu_header.Type).to_bytes(1, byteorder='big')
+                        self.nalunit += data[rtp_hdr.size+2:data_end]
+                        if nalu.fu_header.E == 1:
+                            nalu=RtpNalunit(self.nalunit)
+                            print(f'{nalu} {SliceHeader(self.nalunit[1:3])} sz:{nalu.size}')
+                            if nalu.header.Type == NalunitType.IDR or nalu.header.Type == NalunitType.NON_IDR:
+                                if nalu.header.Type == NalunitType.IDR:
+                                    has_idr=True
+                                gop_size+=1
+                            self._store_frame(self.nalunit)
                     else:
-                        print(f'{nalu} sz: {nalu.size}')
-                        if self._verbose and nalu.header.Type == NalunitType.SPS:
-                            print(f'GOP size={gop_size} {" has" if has_idr else " no"} IDR ')
-                            has_idr = False
-                            gop_size = 0
-                    self._store_frame(data[rtp_hdr.size:data_end])
-
+                        if nalu.header.Type == NalunitType.NON_IDR:
+                            print(f'{nalu} {SliceHeader(data[rtp_hdr.size + 1:rtp_hdr.size + 3])} sz:{nalu.size}')
+                            gop_size += 1
+                        else:
+                            print(f'{nalu} sz: {nalu.size}')
+                            if self._verbose and nalu.header.Type == NalunitType.SPS:
+                                print(f'GOP size={gop_size} {" has" if has_idr else " no"} IDR ')
+                                has_idr = False
+                                gop_size = 0
+                        self._store_frame(data[rtp_hdr.size:data_end])
+                else:
+                    print(f'sound pack of sz: {data_end - rtp_hdr.size}')
             except InvalidRtpInterleaved as err:
                 self.exception = err
                 if data == b'RTSP':
