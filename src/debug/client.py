@@ -1,6 +1,7 @@
 import socket
 import errno
 import os
+import time
 import urllib.parse
 from base64 import b64encode
 from base64 import b64decode
@@ -35,7 +36,7 @@ class RtspDialog:
         if control.startswith('rtsp://'):
             return 'SETUP '+control+' RTSP/1.0\r\n'+transport+'CSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
         if content_base:
-            return "SETUP "+content_base+control+' RTSP/1.0\r\n'+transport+'CSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
+            return "SETUP "+content_base+control+' RTSP/1.0\r\n'+transport+'CSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+self.session+'\r\n'
         return "SETUP "+self.url+self.query+"/"+control+' RTSP/1.0\r\n'+transport+'CSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+'\r\n'
 
     def play(self, cseq, content_base, a_range, scale):
@@ -90,6 +91,8 @@ class RtspReply:
                 self.authentication=hdr.split(': ')[1]
             elif hdr.startswith('Content-Base: '):
                 self.content_base=hdr.split(': ')[1]
+                if self.content_base[-1] != '/':
+                    self.content_base += '/'
             elif hdr.startswith('Range: '):
                 self.range=hdr.split(': ')[1]
 
@@ -156,6 +159,7 @@ class SliceType(IntEnum):
 class SliceHeader:
     def __init__(self, data):
         golomb=Golomb(data)
+        self._slice_type = ''
         self._first_mb_in_slice=golomb.next()
         slice_type=golomb.next()
         if slice_type==SliceType.P or slice_type==SliceType.P+5:
@@ -246,13 +250,11 @@ class Client:
         self._dialog.authorization = self._prepare_authorization('SETUP')
         channel_index = 0
         for sdp_control in self.sdp.control:
-            interleaved = Client.INTERLEAVED_CHANNELS[channel_index]
             if sdp_control:
-                transport = 'Transport: RTP/AVP/TCP;unicast;interleaved='+str(interleaved)+'-'+str(interleaved+1)+'\r\n'
-                reply = self._send_command(self._dialog.setup(reply.cseq + 1, reply.content_base, transport, sdp_control))
-                self.cseq = reply.cseq+1
+                self._send_setup(sdp_control, channel_index, reply.cseq)
                 channel_index += 1
-            self._dialog.session='Session: '+reply.session+'\r\n'
+        if not self._dialog.session:
+            self._send_setup(self.sdp.aggregate_control, 0, reply.cseq)
 
         if self.sdp and len(self.sdp.full_range):
             self._dialog.range=self.sdp.full_range+'\r\n'
@@ -263,6 +265,13 @@ class Client:
         else:
             reply = self._send_command(self._dialog.play(reply.cseq + 1, self._content_base, self.sdp.full_range if self.sdp else None, 1))
         self.cseq = reply.cseq+1
+
+    def _send_setup(self, control, channel, cseq):
+        interleaved = Client.INTERLEAVED_CHANNELS[channel]
+        transport = 'Transport: RTP/AVP/TCP;unicast;interleaved=' + str(interleaved) + '-' + str(interleaved + 1) + '\r\n'
+        reply = self._send_command(self._dialog.setup(cseq + 1, self._content_base, transport, control))
+        self.cseq = reply.cseq + 1
+        self._dialog.session = 'Session: ' + reply.session + '\r\n'
 
     def run(self):
         self._run_thread = threading.Thread(target=thread_function, args=(self,))
@@ -291,8 +300,8 @@ class Client:
             self._command_queue.append({'get_parameter': http_params})
 
     def receive_stream(self):
-        gop_size=0
-        has_idr=False
+        frames_in_fps_calculation=0
+        fps_calculation_time = time.time()
         while self.is_running():
             self._check_command_queue()
             data=b''
@@ -323,21 +332,20 @@ class Client:
                             nalu=RtpNalunit(self.nalunit)
                             print(f'{nalu} {SliceHeader(self.nalunit[1:3])} sz:{nalu.size}')
                             if nalu.header.Type == NalunitType.IDR or nalu.header.Type == NalunitType.NON_IDR:
-                                if nalu.header.Type == NalunitType.IDR:
-                                    has_idr=True
-                                gop_size+=1
+                                frames_in_fps_calculation += 1
                             self._store_frame(self.nalunit)
                     else:
                         if nalu.header.Type == NalunitType.NON_IDR:
                             print(f'{nalu} {SliceHeader(data[rtp_hdr.size + 1:rtp_hdr.size + 3])} sz:{nalu.size}')
-                            gop_size += 1
+                            frames_in_fps_calculation += 1
                         else:
                             print(f'{nalu} sz: {nalu.size}')
-                            if self._verbose and nalu.header.Type == NalunitType.SPS:
-                                print(f'GOP size={gop_size} {" has" if has_idr else " no"} IDR ')
-                                has_idr = False
-                                gop_size = 0
                         self._store_frame(data[rtp_hdr.size:data_end])
+                        if frames_in_fps_calculation >= 50:
+                            delta = time.time() - fps_calculation_time
+                            print(f'FPS = {frames_in_fps_calculation / delta} frames={frames_in_fps_calculation} delta={delta}')
+                            frames_in_fps_calculation = 0
+                            fps_calculation_time = time.time()
                 else:
                     print(f'sound pack of sz: {data_end - rtp_hdr.size}')
             except InvalidRtpInterleaved as err:

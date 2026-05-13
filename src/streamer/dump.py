@@ -71,7 +71,7 @@ class Dump:
             return ret
         raise EOFError()
 
-    def _update_timestamp(self,channel, timestamp):
+    def _update_timestamp(self, channel, timestamp):
         if not channel in self._timestamp:
             self._timestamp[channel] = timestamp
             self._timestamp_ext[channel] = 0
