@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import datetime
 from typing import List
 from .session import Session
@@ -14,14 +15,16 @@ class Connection:
     def _header(headers, header):
         return [k for k in headers if header + ': ' in k]
 
-    def __init__(self, address, root):
+    def __init__(self, **kwargs):
         self._seq_num=1
         self._session=None
         self._dump=None
         self._playing=False
-        self._address=address
-        self._root=root
+        self._address=kwargs.get('address', ('', 4558))
+        self._root=kwargs.get('root', '')
+        self._verbose=kwargs.get('verbose', False)
         self._dumpfile=''
+        self._wait_for=time.time()
         print(f'RTSP connect from {self._address}')
 
     def _sequence_number(self, headers=None):
@@ -44,24 +47,27 @@ class Connection:
     def on_write_event(self, key):
         """Manager write socket event"""
         if key.data.outb:
-            sent=key.fileobj.send(key.data.outb)  # Should be ready to write
-            key.data.outb = key.data.outb[sent:]
-        if self._session and self._playing:
-            try:
-                key.data.outb = self._dump.get_next_packet()
-            except EOFError:
-                self._dump.reopen()
-                key.data.outb = self._dump.get_next_packet()
-            except:  # noqa # pylint: disable=bare-except
-                self._playing = False
+            if self._wait_for <= time.time():
+                sent=key.fileobj.send(key.data.outb)  # Should be ready to write
+                key.data.outb = key.data.outb[sent:]
+        else:
+            if self._session and self._playing:
+                try:
+                    key.data.outb, self._wait_for = self._dump.get_next_packet(self._verbose)
+                except EOFError:
+                    self._dump.reopen()
+                    key.data.outb, self._wait_for = self._dump.get_next_packet(self._verbose)
+                except Exception:  # noqa # pylint: disable=bare-except
+                    self._playing = False
 
     def _on_rtsp_directive(self, data):
         """Manages RTSP directive"""
         if data.inb[0] == 0x24:
-            print(f'rtcp reply: {str(RtpInterleaved(data.inb[0:4]))}')
-            for b in data.inb:
-                print(f'{hex(b)}', end=' ')
-            print('')
+            if self._verbose:
+                print(f'rtcp reply: {str(RtpInterleaved(data.inb[0:4]))}')
+                for b in data.inb:
+                    print(f'{hex(b)}', end=' ')
+                print('')
         else:
             headers = []
             try:
