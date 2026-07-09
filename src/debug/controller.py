@@ -36,12 +36,14 @@ def start():
     parser.add_argument('url', type=str, help='url to rtp source')
     parser.add_argument('-rtpDump', type=str, help='path to file to dump rtp')
     parser.add_argument('-h264Dump', type=str, help='path to file to dump h264')
+    parser.add_argument('-scale', type=int, default=1, help='scale to play with')
+    parser.add_argument('-range', type=str, default=None, help='range to play')
     parser.add_argument('-verbose', action='store_true', help='print debug info')
     args: argparse.Namespace = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
     rtsp_client=client.Client((args.h264Dump, args.rtpDump), args.verbose)
-    rtsp_client.connect(args.url)
+    rtsp_client.connect(args.url, args.scale, args.range)
     rtsp_client.run()
     http_server=ThreadedHTTPServer(('', 5445),handler(rtsp_client))
     try:

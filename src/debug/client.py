@@ -220,7 +220,7 @@ class Client:
             pass
         self._sock.close()
 
-    def connect(self, url):
+    def connect(self, url, scale, a_range):
         self._url = urllib.parse.urlparse(url)
         if self._url.scheme != 'rtsp':
             raise AttributeError('only rtsp scheme is supported')
@@ -260,10 +260,12 @@ class Client:
             self._dialog.range=self.sdp.full_range+'\r\n'
 
         self._dialog.authorization = self._prepare_authorization('PLAY')
+        if not a_range:
+            a_range = self.sdp.full_range if self.sdp else None
         if self.sdp.aggregate_control and self.sdp.aggregate_control.startswith('rtsp://'):
-            reply = self._send_command(self._dialog.play(reply.cseq + 1, self.sdp.aggregate_control, self.sdp.full_range if self.sdp else None, 1))
+            reply = self._send_command(self._dialog.play(reply.cseq + 1, self.sdp.aggregate_control, a_range, scale))
         else:
-            reply = self._send_command(self._dialog.play(reply.cseq + 1, self._content_base, self.sdp.full_range if self.sdp else None, 1))
+            reply = self._send_command(self._dialog.play(reply.cseq + 1, self._content_base, a_range, scale))
         self.cseq = reply.cseq+1
 
     def _send_setup(self, control, channel, cseq):
@@ -330,13 +332,15 @@ class Client:
                         self.nalunit += data[rtp_hdr.size+2:data_end]
                         if nalu.fu_header.E == 1:
                             nalu=RtpNalunit(self.nalunit)
-                            print(f'{nalu} {SliceHeader(self.nalunit[1:3])} sz:{nalu.size}')
+                            print(f'{nalu} {SliceHeader(self.nalunit[1:3])}', end=' ')
                             if nalu.header.Type == NalunitType.IDR or nalu.header.Type == NalunitType.NON_IDR:
+                                print(f'ts: {rtp_hdr.timestamp}', end=' ')
                                 frames_in_fps_calculation += 1
+                            print(f'sz:{nalu.size}')
                             self._store_frame(self.nalunit)
                     else:
                         if nalu.header.Type == NalunitType.NON_IDR:
-                            print(f'{nalu} {SliceHeader(data[rtp_hdr.size + 1:rtp_hdr.size + 3])} sz:{nalu.size}')
+                            print(f'{nalu} {SliceHeader(data[rtp_hdr.size + 1:rtp_hdr.size + 3])} sz:{nalu.size} ts:{rtp_hdr.timestamp}')
                             frames_in_fps_calculation += 1
                         else:
                             print(f'{nalu} sz: {nalu.size}')
