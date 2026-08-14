@@ -81,7 +81,7 @@ class RtspReply:
         for hdr in self.headers:
             if hdr.startswith('CSeq: '):
                 self.cseq=int(hdr.split(' ')[1])
-            elif hdr.startswith('Content-Length: '):
+            elif hdr.lower().startswith('content-length: '):
                 self.content_length=int(hdr.split(': ')[1])
             elif hdr.startswith('Session: '):
                 self.session=hdr.split(': ')[1]
