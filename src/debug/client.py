@@ -36,7 +36,8 @@ class RtspDialog:
         if control.startswith('rtsp://'):
             return 'SETUP '+control+' RTSP/1.0\r\n'+transport+'CSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+'\r\n'
         if content_base:
-            return "SETUP "+content_base+control+' RTSP/1.0\r\n'+transport+'CSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+self.session+'\r\n'
+            cb = content_base if content_base[-1] == '/' else content_base + '/'
+            return "SETUP "+cb+control+' RTSP/1.0\r\n'+transport+'CSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.authorization+self.session+'\r\n'
         return "SETUP "+self.url+self.query+"/"+control+' RTSP/1.0\r\n'+transport+'CSeq: '+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+'\r\n'
 
     def play(self, cseq, content_base, a_range, scale):
@@ -351,7 +352,8 @@ class Client:
                             frames_in_fps_calculation = 0
                             fps_calculation_time = time.time()
                 else:
-                    print(f'sound pack of sz: {data_end - rtp_hdr.size}')
+                    hdr = RtpHeader(data)
+                    print(f'sound pack of sz: {data_end - rtp_hdr.size} ts: {hdr.timestamp}')
             except InvalidRtpInterleaved as err:
                 self.exception = err
                 if data == b'RTSP':
