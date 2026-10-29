@@ -53,6 +53,14 @@ class RtspDialog:
             ret+="Scale: "+str(scale)+"\r\n"
         return ret+"CSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
 
+    def scale(self, cseq, content_base, scale):
+        if not content_base:
+            ret="PLAY "+self.url+self.query+" RTSP/1.0\r\n"
+        else:
+            ret="PLAY "+content_base+" RTSP/1.0\r\n"
+        ret+="Scale: "+str(scale)+"\r\n"
+        return ret+"CSeq: "+str(cseq)+"\r\nUser-Agent: "+self._user_agent+self.session+self.authorization+"\r\n"
+
     def pause(self, cseq, content_base, a_range):
         if not content_base:
             ret="PAUSE "+self.url+self.query+" RTSP/1.0\r\n"
@@ -159,7 +167,7 @@ class SliceType(IntEnum):
 
 class SliceHeader:
     def __init__(self, data):
-        golomb=Golomb(data)
+        golomb=Golomb(data[0:3])
         self._slice_type = ''
         self._first_mb_in_slice=golomb.next()
         slice_type=golomb.next()
@@ -305,6 +313,8 @@ class Client:
     def receive_stream(self):
         frames_in_fps_calculation=0
         fps_calculation_time = time.time()
+        ts_diff = dict()
+        dt_diff = dict()
         while self.is_running():
             self._check_command_queue()
             data=b''
@@ -336,12 +346,24 @@ class Client:
                             print(f'{nalu} {SliceHeader(self.nalunit[1:3])}', end=' ')
                             if nalu.header.Type == NalunitType.IDR or nalu.header.Type == NalunitType.NON_IDR:
                                 print(f'ts: {rtp_hdr.timestamp}', end=' ')
+                                if interleaved.channel in ts_diff:
+                                    print(f'diff: [ts={rtp_hdr.timestamp - ts_diff[interleaved.channel]}', end=' ')
+                                    print(f'dt={int((datetime.now().timestamp() - dt_diff[interleaved.channel].timestamp())*1000)} msec.]', end=' ')
+                                ts_diff[interleaved.channel] = rtp_hdr.timestamp
+                                dt_diff[interleaved.channel] = datetime.now()
                                 frames_in_fps_calculation += 1
                             print(f'sz:{nalu.size}')
                             self._store_frame(self.nalunit)
                     else:
-                        if nalu.header.Type == NalunitType.NON_IDR:
-                            print(f'{nalu} {SliceHeader(data[rtp_hdr.size + 1:rtp_hdr.size + 3])} sz:{nalu.size} ts:{rtp_hdr.timestamp}')
+                        if nalu.header.Type == NalunitType.IDR or nalu.header.Type == NalunitType.NON_IDR:
+                            print(f'{nalu} {SliceHeader(data[rtp_hdr.size + 1:rtp_hdr.size + 3])} ts:{rtp_hdr.timestamp}', end=' ')
+                            if interleaved.channel in ts_diff:
+                                print(f'diff: [ts={rtp_hdr.timestamp - ts_diff[interleaved.channel]}', end=' ')
+                                print(f'dt={int((datetime.now().timestamp() - dt_diff[interleaved.channel].timestamp()) * 1000)} msec.]', end=' ')
+                            ts_diff[interleaved.channel] = rtp_hdr.timestamp
+                            dt_diff[interleaved.channel] = datetime.now()
+                            print(f'sz:{nalu.size}')
+                            frames_in_fps_calculation += 1
                             frames_in_fps_calculation += 1
                         else:
                             print(f'{nalu} sz: {nalu.size}')
@@ -406,7 +428,10 @@ class Client:
                             elif p[0]=='scale':
                                 a_scale=int(p[1])
                     self._dialog.authorization=self._prepare_authorization('PLAY')
-                    self._send_command(self._dialog.play(self.cseq+1, self._content_base, a_range, a_scale))
+                    if a_range:
+                        self._send_command(self._dialog.play(self.cseq+1, self._content_base, a_range, a_scale))
+                    else:
+                        self._send_command(self._dialog.scale(self.cseq + 1, self._content_base, a_scale))
                     self.cseq+=1
                 elif key == 'pause':
                     self._dialog.authorization = self._prepare_authorization('PAUSE')

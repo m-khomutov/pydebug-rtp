@@ -6,7 +6,7 @@ from . import client
 
 
 def handler(rtsp_client):
-    logging.info('Starting http ...')
+    logging.info('Starting listening http commands on port 5445 ...')
     class Handler(BaseHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
